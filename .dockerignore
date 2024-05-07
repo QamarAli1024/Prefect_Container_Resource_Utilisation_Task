@@ -1,0 +1,10 @@
+tests
+test_data
+docs
+davinci.egg-info
+data
+images
+.tokens
+.pytest_cache
+.github
+__pycache__

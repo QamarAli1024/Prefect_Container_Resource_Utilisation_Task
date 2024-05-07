@@ -1,0 +1,4 @@
+pandas==2.1.4
+pydantic==1.10.11
+pendulum==2.1.2
+prefect==2.12.1
