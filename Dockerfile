@@ -2,7 +2,7 @@ FROM 823367020558.dkr.ecr.us-east-1.amazonaws.com/kencologistics/codebase@sha256
 
 ## DEVELOPER TODO: MODFIY THE BELOW LINE TO MATCH THE NAME OF THE REPO.
 ## WORKDIR /home/ubunut/{repo_name}
-WORKDIR /home/ubuntu/prefect_ecs
+WORKDIR /home/ubuntu/Prefect_Container_Resource_Utilisation_Task
 
 ## Pip install any new dependencies
 ## Note that this means you might potentially overwrite libraries for codebase
