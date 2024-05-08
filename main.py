@@ -3,17 +3,15 @@ import boto3
 from datetime import datetime, timedelta
 
 from davinci.services.auth import get_secret
+from davinci.services.outlook import DavinciEmail
 import warnings
 import pandas as pd
 warnings.filterwarnings("ignore")
 
 @task
-def get_task_definition_families(cluster_name):
+def get_task_definition_families():
     """
-    Get all the TaskDefinitionFamilies associated with a given ECS cluster.
-
-    Args:
-    - cluster_name: Name of the ECS cluster
+    Get all the TaskDefinitionFamilies.
 
     Returns:
     - List of TaskDefinitionFamilies
@@ -101,7 +99,7 @@ def fetch_ecs_metrics(cloudwatch, cluster_name, task_definition_family):
     return cpu_utilization, cpu_max, cpu_reserved, memory_utilization, memory_max, memory_reserved
 
 
-@flow(name='prefect-container-utilisation-task-flow', retries=3, retry_delay_seconds=30)
+@flow(name='prefect-container-utilisation-task-flow', retries=3, retry_delay_seconds=30, log_prints=True)
 def main(config=None):
     # config = config if config else {}
     # logger = get_run_logger()
@@ -119,47 +117,58 @@ def main(config=None):
     }
     cloudwatch = boto3.client(**boto3_login)
 
-    # Replace 'YourClusterName' and 'YourTaskDefinitionFamily' with your ECS cluster and task definition family
-    cluster_name = 'ECSClusterDev'
-    # task_definition_family = 'dash_bb_pick_path-pickpath-optimizer-dev'
-    task_definition_families = get_task_definition_families(cluster_name)
+    task_definition_families = get_task_definition_families()
+    print("Number of task_definition_families:", len(task_definition_families))
 
     rows_list = []
-
     for task_definition_family in task_definition_families:
-        cpu_util, cpu_max, cpu_reserved, mem_util, mem_max, mem_reserved = fetch_ecs_metrics(cloudwatch, cluster_name,
-                                                                                             task_definition_family)
-        print(task_definition_family)
-        print("CPU Utilization:", cpu_util)
-        print("CPU Max:", cpu_max)
-        print("CPU Reserved:", cpu_reserved)
-        print("Memory Utilization:", mem_util)
-        print("Memory Max:", mem_max)
-        print("Memory Reserved:", mem_reserved)
+        for cluster_name in ["ECSClusterProd", "ECSClusterDev"]:
+            cpu_util, cpu_max, cpu_reserved, mem_util, mem_max, mem_reserved = fetch_ecs_metrics(cloudwatch, cluster_name,
+                                                                                                 task_definition_family)
+            print(task_definition_family)
+            print("CPU Utilization:", cpu_util)
+            print("CPU Max:", cpu_max)
+            print("CPU Reserved:", cpu_reserved)
+            print("Memory Utilization:", mem_util)
+            print("Memory Max:", mem_max)
+            print("Memory Reserved:", mem_reserved)
 
-        if (cpu_util and cpu_max and cpu_reserved and
-                mem_util and mem_max and mem_reserved):
-            cpu_savings = None
-            mem_savings = None
-            if (cpu_util[0] / cpu_reserved[0]) < 0.5:
-                cpu_savings = cpu_reserved[0] * (1 - (cpu_util[0] / cpu_reserved[0]) / 0.5)
-            elif (cpu_util[0] / cpu_reserved[0]) > 0.8:
-                cpu_savings = cpu_reserved[0] * (1 - (cpu_util[0] / cpu_reserved[0]) / 0.8)
-            if (mem_util[0] / mem_reserved[0]) < 0.5:
-                mem_savings = mem_reserved[0] * (1 - (mem_util[0] / mem_reserved[0]) / 0.5)
-            elif (mem_util[0] / mem_reserved[0]) > 0.8:
-                mem_savings = mem_reserved[0] * (1 - (mem_util[0] / mem_reserved[0]) / 0.8)
+            if (cpu_util and cpu_max and cpu_reserved and
+                    mem_util and mem_max and mem_reserved):
+                cpu_savings = 0
+                mem_savings = 0
+                if (cpu_util[0] / cpu_reserved[0]) < 0.5:
+                    cpu_savings = cpu_reserved[0] * (1 - (cpu_util[0] / cpu_reserved[0]) / 0.5)
+                elif (cpu_util[0] / cpu_reserved[0]) > 0.8:
+                    cpu_savings = cpu_reserved[0] * (1 - (cpu_util[0] / cpu_reserved[0]) / 0.8)
+                if (mem_util[0] / mem_reserved[0]) < 0.5:
+                    mem_savings = mem_reserved[0] * (1 - (mem_util[0] / mem_reserved[0]) / 0.5)
+                elif (mem_util[0] / mem_reserved[0]) > 0.8:
+                    mem_savings = mem_reserved[0] * (1 - (mem_util[0] / mem_reserved[0]) / 0.8)
 
-            if ((cpu_util[0] / cpu_reserved[0]) < 0.5) or ((cpu_util[0] / cpu_reserved[0]) > 0.8) \
-                    or ((mem_util[0] / mem_reserved[0]) < 0.5) or ((mem_util[0] / mem_reserved[0]) > 0.8):
-                rows_list.append({'Task Name': task_definition_family, 'Average CPU': cpu_util[0],
-                                  'Max CPU': cpu_max[0], 'CPU Reserved': cpu_reserved[0],
-                                  'Average Memory': mem_util[0], 'Max Memory': mem_max[0],
-                                  'Memory Reserved': mem_reserved[0],
-                                  'CPU Savings': cpu_savings, 'Memory Savings': mem_savings})
+                if ((cpu_util[0] / cpu_reserved[0]) < 0.5) or ((cpu_util[0] / cpu_reserved[0]) > 0.8) \
+                        or ((mem_util[0] / mem_reserved[0]) < 0.5) or ((mem_util[0] / mem_reserved[0]) > 0.8):
+                    rows_list.append({'Task Name': task_definition_family, 'Average CPU': round(cpu_util[0]),
+                                      'Max CPU': round(cpu_max[0]), 'CPU Reserved': round(cpu_reserved[0]),
+                                      'Average Memory': round(mem_util[0]), 'Max Memory': round(mem_max[0]),
+                                      'Memory Reserved': round(mem_reserved[0]),
+                                      'CPU Savings': round(cpu_savings), 'Memory Savings': round(mem_savings),
+                                      'CPU + Memory Savings': round(cpu_savings + mem_savings)})
 
     df = pd.DataFrame(rows_list)
+    df = df.sort_values('CPU + Memory Savings', ascending=False)
     print(df)
+
+    email = DavinciEmail(f"Tasks over-utilizing or under-utilizing CPU and Memory resources",
+                         "<h3>Please find data attached for tasks falling above "
+                         "or below 50%-80% threshold for CPU and Memory resource-utilization.</h3>", False)
+    email.embed_df_as_html_table(df, color='blue_light', font_size=14, text_align='center')
+
+    recipients = get_secret('DEV_TEAM')
+
+    email.send(list(set(recipients)))  # unique recipients
+
+    print('Email Sent.')
 
     # return res
     return
