@@ -162,8 +162,8 @@ def main(config=None):
                          "or below 50%-80% threshold for CPU and Memory resource-utilization.</h3>", False)
     email.embed_df_as_html_table(df, color='blue_light', font_size=14, text_align='center')
     recipients = get_secret('DEV_TEAM')
-    # email.send(list(set(recipients)))  # unique recipients
-    # print('Email Sent.')
+    email.send(list(set(recipients)))  # unique recipients
+    print('Email Sent.')
 
     # return res
     return
